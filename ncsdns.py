@@ -22,8 +22,7 @@ from custom.message import Message
 TIMEOUT = 5
 
 # maximum time in seconds for a recursive DNS query
-# TODO change this to 60
-MAX_QUERY_TIME = 10
+MAX_QUERY_TIME = 60
 
 # max retries if a server is not responsive
 MAX_RETRIES = 5
