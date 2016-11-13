@@ -102,6 +102,7 @@ cnamecache = dict([])
 def update_cnamecache(cname_records, ref_time):
   for record in cname_records:
     domain, cname, ttl = record._dn, record._cname, record._ttl
+    if ttl == 0: continue # do not cache records with 0 TTL
     new_entry = CnameCacheEntry(cname,
                                 expiration=ttl + ref_time,
                                 authoritative=True)
@@ -123,6 +124,7 @@ def get_cnamecache(domain, ref_time):
 def update_acache(a_records, ref_time):
   for record in a_records:
     domain, ttl = record._dn, record._ttl
+    if ttl == 0: continue # do not cache records with 0 TTL
     addr = InetAddr.fromNetwork(record._addr)
     new_entry = CacheEntry(expiration=ttl + ref_time,
                            authoritative=True)
@@ -146,6 +148,7 @@ def get_acache(a_records, ref_time):
 def update_nscache(ns_records, ref_time):
   for record in ns_records:
     domain, nsdn, ttl = record._dn, record._nsdn, record._ttl
+    if ttl == 0: continue # do not cache records with 0 TTL
     new_entry = CacheEntry(expiration=ttl + ref_time,
                            authoritative=True)
 
