@@ -293,20 +293,16 @@ def query(domain, dns_ip=ROOTNS_IN_ADDR, begin=None, result=None):
       update_cnamecache(answer_cname_records, ref_time=begin)
       update_nscache(ns_records, ref_time=begin)
 
-      pp.pprint(acache)
-      pp.pprint(cnamecache)
-      pp.pprint(nscache)
+      result['answers'] += answer_records
+      result['nameservers'] += ns_records
+      result['additional'] += additional_a_records
 
       if answer_a_records:
-        result['answers'] += answer_a_records
-        return Message(answers=answer_a_records,
-                       nameservers=ns_records,
-                       additional=d.additional)
+        return Message(**result)
 
       if answer_cname_records:
-        result['answers'] += answer_cname_records
         for record in answer_cname_records:
-          q = query(record._cname, ROOTNS_IN_ADDR, begin)
+          q = query(record._cname, ROOTNS_IN_ADDR, begin, result)
           if q:
             return q
 
@@ -319,11 +315,11 @@ def query(domain, dns_ip=ROOTNS_IN_ADDR, begin=None, result=None):
           if dns_query:
             a_records_for_ns = filter(lambda x: x._dn == ns._nsdn, dns_query.answers)
 
-        result['nameservers'] += a_records_for_ns
+        result['additional'] += a_records_for_ns
 
         for a_record in a_records_for_ns:
           new_dns_ip = inet_ntoa(a_record._addr)
-          q = query(domain, new_dns_ip, begin)
+          q = query(domain, new_dns_ip, begin, result)
           # if successfully resolved, return result
           # otherwise, keep iterating thourgh nameservers
           if q:
