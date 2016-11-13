@@ -135,7 +135,7 @@ def update_acache(a_records, ref_time):
          acache[domain]._dict[addr]._expiration < new_entry._expiration:
       acache[domain]._dict[addr] = new_entry
 
-def get_acache(a_records, ref_time):
+def get_acache(domain, ref_time):
   results = []
   if domain in acache:
     for addr, entry in acache[domain]._dict.iteritems():
