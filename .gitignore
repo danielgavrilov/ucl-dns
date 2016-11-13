@@ -89,5 +89,8 @@ ENV/
 # Rope project settings
 .ropeproject
 
+# Mac OS X
+.DS_Store
+
 # Server logs
 logs/
