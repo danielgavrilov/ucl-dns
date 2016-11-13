@@ -280,8 +280,8 @@ def query(domain, dns_ip=ROOTNS_IN_ADDR, begin=None, result=None):
       if d is None:
         retries -= 1
         continue
-
-      retries = 0
+      else:
+        retries = 0
 
       answer_records =       filter(lambda x: domain == x._dn, d.answers)
       answer_a_records =     filter(lambda x: isinstance(x, RR_A), answer_records)
