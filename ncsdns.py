@@ -99,6 +99,74 @@ acache = dict([(DomainName(ROOTNS_DN),
 # [domain name --> CnameCacheEntry]
 cnamecache = dict([])
 
+def update_cnamecache(cname_records, ref_time):
+  for record in cname_records:
+    domain, cname, ttl = record._dn, record._cname, record._ttl
+    new_entry = CnameCacheEntry(cname,
+                                expiration=ttl + ref_time,
+                                authoritative=True)
+
+    if domain not in cnamecache or \
+       cnamecache[domain]._expiration < new_entry._expiration:
+      cnamecache[domain] = new_entry
+
+def get_cnamecache(domain, ref_time):
+  results = []
+  if domain in cnamecache:
+    entry = cnamecache[domain]
+    if entry._expiration > ref_time:
+      results.append(RR_CNAME(domain, entry._expiration - ref_time, cname))
+    else:
+      del cnamecache[domain]
+  return results
+
+def update_acache(a_records, ref_time):
+  for record in a_records:
+    domain, ttl = record._dn, record._ttl
+    addr = InetAddr.fromNetwork(record._addr)
+    new_entry = CacheEntry(expiration=ttl + ref_time,
+                           authoritative=True)
+
+    if domain not in acache:
+      acache[domain] = ACacheEntry(dict([(addr, new_entry)]))
+    elif addr not in acache[domain]._dict or \
+         acache[domain]._dict[addr]._expiration < new_entry._expiration:
+      acache[domain]._dict[addr] = new_entry
+
+def get_acache(a_records, ref_time):
+  results = []
+  if domain in acache:
+    for addr, entry in acache[domain]._dict.iteritems():
+      if entry._expiration > ref_time:
+        results.append(RR_A(domain, entry._expiration - ref_time, addr))
+      else:
+        del acache[domain]._dict[addr]
+  return results
+
+def update_nscache(ns_records, ref_time):
+  for record in ns_records:
+    domain, nsdn, ttl = record._dn, record._nsdn, record._ttl
+    new_entry = CacheEntry(expiration=ttl + ref_time,
+                           authoritative=True)
+
+    if domain not in nscache:
+      nscache[domain] = OrderedDict([(nsdn, new_entry)])
+    elif nsdn not in nscache[domain] or \
+         nscache[domain][nsdn]._expiration < new_entry._expiration:
+      nscache[domain][nsdn] = new_entry
+
+def get_nscache(domain, ref_time):
+  results = []
+  while len(results) == 0:
+    if domain in nscache:
+      for nsdn, entry in nscache[domain].iteritems():
+        if entry._expiration > ref_time:
+          results.append(RR_NS(domain, entry._expiration - ref_time, nsdn))
+        else:
+          del nscache[domain][nsdn]
+    domain = domain.parent()
+  return results
+
 # Parse the command line and assign us an ephemeral port to listen on:
 def check_port(option, opt_str, value, parser):
   if value < 32768 or value > 61000:
@@ -147,7 +215,7 @@ def find(fn, array):
       return i
   return None
 
-def ask_server(domain, dns_ip, retries=MAX_RETRIES):
+def ask_server(domain, dns_ip):
 
   id = rand_id()
   message = Message(question=QE(dn=domain))
@@ -167,28 +235,28 @@ def ask_server(domain, dns_ip, retries=MAX_RETRIES):
   print response
 
   # discard packets received with mismatching id
-  if d.header._id != id:
+  if response.header._id != id:
     logger.log(DEBUG2, "Ignored packet with mismatching id.")
   # discard packets which are not responses
-  elif d.header._qr == 0:
+  elif response.header._qr == 0:
     logger.log(DEBUG2, "Ignored packet which is not a response.")
   # discard packets which have an altered question compared to the query
-  elif d.question._dn != domain or d.question._type != QE.TYPE_A:
+  elif response.question._dn != domain or response.question._type != QE.TYPE_A:
     logger.log(DEBUG2, "Ignored packet which has altered question.")
   else:
     return response
 
-# def mul_query(domain, dns_ips, begin=None):
-#   if begin is None: begin = time()
-#   for dns_ip in dns_ips:
-#     response = query(domain, dns_ip)
-#     if response.is_successful_response():
-#       return response
-#   return None
+def replace_dn(domain, lst):
+  def replace_single(rr):
+    rr_copy = copy(rr)
+    rr_copy._dn = domain
+    return rr_copy
+  return map(replace_single, lst)
 
-def query(domain, dns_ip, begin=None):
+def query(domain, dns_ip=ROOTNS_IN_ADDR, begin=None, result=None):
 
   if begin is None: begin = time()
+  if result is None: result = { "answers": [], "nameservers": [], "additional": [] }
 
   retries = 0
 
@@ -204,43 +272,40 @@ def query(domain, dns_ip, begin=None):
 
     try:
 
-      id = rand_id()
-      message = Message(question=QE(dn=domain))
-      message.generate_header(id,
-                              Header.OPCODE_QUERY,
-                              Header.RCODE_NOERR)
-      message = message.pack()
+      d = ask_server(domain, dns_ip)
 
-      print "\nQuery to %s:" % dns_ip
-      print Message.fromData(message)
+      if d is None:
+        retries -= 1
+        continue
 
-      cs.sendto(message, (dns_ip, DNS_PORT))
-      data, address = cs.recvfrom(512)
       retries = 0
-      d = Message.fromData(data)
 
-      # discard packets received with mismatching id
-      if d.header._id != id:
-        logger.log(DEBUG2, "Ignored packet with mismatching id.")
-        continue
-
-      # discard packets which are not responses
-      if d.header._qr == 0:
-        logger.log(DEBUG2, "Ignored packet which is not a response.")
-        continue
-
-      print "\nResponse:"
-      print Message.fromData(data)
-
-      answer_records = filter(lambda x: domain == x._dn, d.answers)
-      ns_records = filter(lambda x: is_part_of(domain, x._dn), d.nameservers)
+      answer_records =       filter(lambda x: domain == x._dn, d.answers)
+      answer_a_records =     filter(lambda x: isinstance(x, RR_A), answer_records)
+      answer_cname_records = filter(lambda x: isinstance(x, RR_CNAME), answer_records)
+      ns_records =           filter(lambda x: isinstance(x, RR_NS) and is_part_of(domain, x._dn), d.nameservers)
       additional_a_records = filter(lambda x: isinstance(x, RR_A), d.additional)
 
-      for answer in answer_records:
-        if isinstance(answer, RR_A):
-          return d
-        elif isinstance(answer, RR_CNAME):
-          return query(answer._cname, ROOTNS_IN_ADDR, begin)
+      update_acache(additional_a_records + answer_a_records, ref_time=begin)
+      update_cnamecache(answer_cname_records, ref_time=begin)
+      update_nscache(ns_records, ref_time=begin)
+
+      pp.pprint(acache)
+      pp.pprint(cnamecache)
+      pp.pprint(nscache)
+
+      if answer_a_records:
+        result['answers'] += answer_a_records
+        return Message(answers=answer_a_records,
+                       nameservers=ns_records,
+                       additional=d.additional)
+
+      if answer_cname_records:
+        result['answers'] += answer_cname_records
+        for record in answer_cname_records:
+          q = query(record._cname, ROOTNS_IN_ADDR, begin)
+          if q:
+            return q
 
       for ns in ns_records:
 
@@ -248,14 +313,17 @@ def query(domain, dns_ip, begin=None):
 
         if not a_records_for_ns:
           dns_query = query(ns._nsdn, ROOTNS_IN_ADDR, begin)
-          a_records_for_ns = filter(lambda x: x._dn == ns._nsdn, dns_query.answers)
+          if dns_query:
+            a_records_for_ns = filter(lambda x: x._dn == ns._nsdn, dns_query.answers)
+
+        result['nameservers'] += a_records_for_ns
 
         for a_record in a_records_for_ns:
           new_dns_ip = inet_ntoa(a_record._addr)
           q = query(domain, new_dns_ip, begin)
           # if successfully resolved, return result
           # otherwise, keep iterating thourgh nameservers
-          if q.is_successful_response():
+          if q:
             return q
 
     except timeout:
@@ -281,17 +349,20 @@ while 1:
   if not question:
     continue
 
-  q = query(question._dn, ROOTNS_IN_ADDR)
+  q = query(question._dn)
 
   if q:
-    message = Message(question=question, answers=q.answers)
+    message = Message(question=question,
+                      answers=q.answers,
+                      nameservers=q.nameservers,
+                      additional=q.additional)
     message.generate_header(d.header._id,
                             Header.OPCODE_QUERY,
                             Header.RCODE_NOERR,
                             qr=True)
     reply = message.pack()
   else:
-    message = Message(question=quesiton)
+    message = Message(question=question)
     message.generate_header(d.header._id,
                             Header.OPCODE_QUERY,
                             Header.RCODE_SRVFAIL,

@@ -31,11 +31,6 @@ class Message:
   def question(self):
     return self.questions[0] if self.questions else None
 
-  def is_successful_response(self):
-    return len(self.answers) > 0 and \
-           self.header._qr == 1 and \
-           self.header.rcode == Header.RCODE_NOERR
-
   def generate_header(self, *args, **kwargs):
     if "qdcount" not in kwargs: kwargs["qdcount"] = len(self.questions)
     if "ancount" not in kwargs: kwargs["ancount"] = len(self.answers)
