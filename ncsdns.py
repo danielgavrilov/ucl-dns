@@ -223,9 +223,10 @@ def is_subdomain_of(child, parent):
     child = child.parent()
   return False
 
-# For a given domain, it returns a dictionary of:
-# - the cached A and CNAME records as "answers"
-# - the NS records as "nameservers"
+# For a given domain and a time, it returns a dictionary of:
+# - the cached A and CNAME records for the domain as "answers"
+# - the cached NS records for the domain as "nameservers"
+# The time is specified in seconds since "the beginning of the world".
 def get_cache(domain, ref_time):
   answers = get_acache(domain, ref_time) + get_cnamecache(domain, ref_time)
   nameservers = get_nscache(domain, ref_time)
@@ -234,8 +235,8 @@ def get_cache(domain, ref_time):
     "nameservers": nameservers
   }
 
-# Given an RR (A, CNAME or NS), it returns a tuple of 3 items that uniquely TODO
-# Used to identify duplicate records.
+# Given an RR (A, CNAME or NS), it returns a tuple of 3 items that is used to
+# detect duplicate records.
 def tuple_from_record(record):
   last = None
   if hasattr(record, "_addr"):
@@ -261,8 +262,8 @@ def discard_dup_records(records):
       seen.add(t)
   return results
 
-# Given a domain and a list of NS records, it returns the highest qualified NS
-# records for the domain.
+# Given a domain and a list of NS records, it returns the highest qualified
+# NS records for the domain.
 def get_highest_qualified(domain, ns_records):
   results = []
   while len(results) == 0 and domain != DomainName("."):
@@ -270,6 +271,9 @@ def get_highest_qualified(domain, ns_records):
     domain = domain.parent()
   return discard_dup_records(results)
 
+# Given a list of NS records, another of A records and the time, it returns a
+# list of glue records for the NS records. The time is specified in seconds
+# since "the beginning of the world" and is used for querying the cache for A records.
 def get_glue_records(ns_records, a_records, ref_time):
   results = []
   for ns in ns_records:
@@ -278,6 +282,8 @@ def get_glue_records(ns_records, a_records, ref_time):
     results += glue_records
   return discard_dup_records(results)
 
+# Given a list of NS records and another of A records, it returns a list of
+# tuples (ns_record, [a_records]), associating each NS record with its glue A records.
 def get_glued(ns_records, a_records):
   results = []
   for ns in ns_records:
@@ -285,12 +291,17 @@ def get_glued(ns_records, a_records):
     results.append((ns, glue_records))
   return sorted(results, key=lambda x: len(x[1]), reverse=True)
 
+# Given two dictionaries whose values are lists,
+# it appends the list of `src` onto `dst`.
 def dict_append(dst, src):
   for key, lst in src.iteritems():
     dst[key] += lst
   return dst
 
-def ask_server(domain, dns_ip):
+# Sends a single A record "question" to the given dns_ip.
+# If it fails for whateher reason, it immediately gives up and returns `None`,
+# otherwise, it returns the message as a `Message` object.
+def send_question(domain, dns_ip):
 
   id = rand_id()
   message = Message(question=QE(dn=domain))
@@ -300,7 +311,6 @@ def ask_server(domain, dns_ip):
   message_data = message.pack()
 
   print "\n=============================================================================\n"
-
   print "QUERY TO %s:\n" % dns_ip
   print message
 
@@ -309,7 +319,7 @@ def ask_server(domain, dns_ip):
 
   response = None
 
-  # In case message cannot be parsed
+  # detect corrupt messages where the message cannot be parsed
   try:
     response = Message.fromData(response_data)
     str(response)
@@ -320,18 +330,74 @@ def ask_server(domain, dns_ip):
   print "\nRESPONSE:\n"
   print response
 
-  # discard packets received with mismatching id
+  # discard messages received with mismatching id
   if response.header._id != id:
     logger.log(DEBUG2, "Ignored packet with mismatching id.")
-  # discard packets which are not responses
+  # discard messages which are not responses
   elif response.header._qr == 0:
     logger.log(DEBUG2, "Ignored packet which is not a response.")
-  # discard packets which have an altered question compared to the query
+  # discard messages which have an altered question compared to the query
   elif response.question._dn != domain or response.question._type != QE.TYPE_A:
     logger.log(DEBUG2, "Ignored packet which has altered question.")
   else:
     return response
 
+# Custom error classes
+
+class ExceededMaxQueryTime(Exception):
+  pass
+
+class ExceededMaxRetries(Exception):
+  pass
+
+# Given a domain, reference start time (`begin`, in seconds) and a list of
+# DNS server IPs, it returns the result as a dictionary of lists of "answer",
+# "authority" and "additional" records.
+# It automatically retries in case of message errors and raises exceptions when
+# exceeding the maximum retries or maximum query time.
+# It also automatically updates the cache with A and NS records.
+def query(domain, begin, dns_ips):
+
+  retries = 0 # keeps track how many times a request has been retried
+  ith_dns_ip = 0 #
+  done = False
+
+  while True:
+    if retries > MAX_RETRIES:
+      raise ExceededMaxRetries
+    if time() > (begin + MAX_QUERY_TIME):
+      raise ExceededMaxQueryTime
+    try:
+      dns_ip = dns_ips[ith_dns_ip]
+      response = send_question(domain, dns_ip)
+      if response is None:
+        retries += 1
+        ith_dns_ip = (ith_dns_ip + 1) % len(dns_ips)
+      else:
+        retries = 0
+        break
+    except timeout:
+      retries += 1
+
+  answer_records =       filter(lambda x: domain == x._dn, response.answers)
+  answer_a_records =     filter(lambda x: isinstance(x, RR_A), answer_records)
+  answer_cname_records = filter(lambda x: isinstance(x, RR_CNAME), answer_records)
+  ns_records =           filter(lambda x: isinstance(x, RR_NS) and is_subdomain_of(domain, x._dn), response.nameservers)
+  additional_a_records = filter(lambda x: isinstance(x, RR_A), response.additional)
+
+  # TODO: vulnerable to cache poisoning, implement bailiwick checking?
+
+  update_acache(answer_a_records + additional_a_records, ref_time=begin)
+  update_cnamecache(answer_cname_records, ref_time=begin)
+  update_nscache(ns_records, ref_time=begin)
+
+  return {
+    "answers": answer_records,
+    "nameservers": ns_records,
+    "additional": additional_a_records
+  }
+
+# TODO document this beast
 def resolver(domain, begin=None, answers=None, nameservers=None, additional=None, aggregate=None):
 
   if begin is None: begin = time()
@@ -345,16 +411,16 @@ def resolver(domain, begin=None, answers=None, nameservers=None, additional=None
   nameservers = discard_dup_records(nameservers + cache["nameservers"])
   additional = get_glue_records(nameservers, additional, ref_time=begin)
 
+  aggregate_temp = {
+    "answers": answers,
+    "nameservers": nameservers,
+    "additional": additional
+  }
+
   if aggregate is None:
-    aggregate = {
-      "answers": answers,
-      "nameservers": nameservers,
-      "additional": additional
-    }
+    aggregate = aggregate_temp
   else:
-    dict_append(aggregate, { "answers": answers,
-                             "nameservers": nameservers,
-                             "additional": additional })
+    dict_append(aggregate, aggregate_temp)
 
   answer_a_records =     filter(lambda x: isinstance(x, RR_A), answers)
   answer_cname_records = filter(lambda x: isinstance(x, RR_CNAME), answers)
@@ -384,6 +450,7 @@ def resolver(domain, begin=None, answers=None, nameservers=None, additional=None
         a_records_for_ns = filter(lambda x: x._dn == ns._nsdn, dns_query["answers"])
 
     dns_ips = map(lambda x: inet_ntoa(x._addr), a_records_for_ns)
+    # TODO avoid loops
     q = query(domain, begin=begin, dns_ips=dns_ips)
     # if successfully resolved, return result
     # otherwise, keep iterating thourgh nameservers
@@ -394,52 +461,6 @@ def resolver(domain, begin=None, answers=None, nameservers=None, additional=None
                               nameservers=q["nameservers"],
                               additional=q["additional"],
                               aggregate=aggregate)
-
-class ExceededMaxQueryTime(Exception):
-  pass
-
-class ExceededMaxRetries(Exception):
-  pass
-
-def query(domain, begin, dns_ips=[], aggregate=None):
-
-  retries = 0
-  ith_dns_ip = 0
-  done = False
-
-  while True:
-    if retries > MAX_RETRIES:
-      raise ExceededMaxRetries
-    if time() > (begin + MAX_QUERY_TIME):
-      raise ExceededMaxQueryTime
-    try:
-      print ith_dns_ip
-      dns_ip = dns_ips[ith_dns_ip]
-      response = ask_server(domain, dns_ip)
-      if response is None:
-        retries += 1
-        ith_dns_ip = (ith_dns_ip + 1) % len(dns_ips)
-      else:
-        retries = 0
-        break
-    except timeout:
-      retries += 1
-
-  answer_records =       filter(lambda x: domain == x._dn, response.answers)
-  answer_a_records =     filter(lambda x: isinstance(x, RR_A), answer_records)
-  answer_cname_records = filter(lambda x: isinstance(x, RR_CNAME), answer_records)
-  ns_records =           filter(lambda x: isinstance(x, RR_NS) and is_subdomain_of(domain, x._dn), response.nameservers)
-  additional_a_records = filter(lambda x: isinstance(x, RR_A), response.additional)
-
-  update_acache(answer_a_records + additional_a_records, ref_time=begin)
-  update_cnamecache(answer_cname_records, ref_time=begin)
-  update_nscache(ns_records, ref_time=begin)
-
-  return {
-    "answers": answer_records,
-    "nameservers": ns_records,
-    "additional": additional_a_records
-  }
 
 # This is a simple, single-threaded server that takes successive
 # connections with each iteration of the following loop:
