@@ -398,7 +398,7 @@ def query(domain, begin, dns_ips):
   }
 
 # TODO document this beast
-def resolver(domain, begin=None, answers=None, nameservers=None, additional=None, aggregate=None):
+def resolve(domain, begin=None, answers=None, nameservers=None, additional=None, aggregate=None):
 
   if begin is None: begin = time()
   if answers is None: answers = []
@@ -437,7 +437,7 @@ def resolver(domain, begin=None, answers=None, nameservers=None, additional=None
 
   if answer_cname_records:
     for record in answer_cname_records:
-      q = resolver(record._cname, begin=begin)
+      q = resolve(record._cname, begin=begin)
       if q:
         q["answers"] = [record] + q["answers"]
         return q
@@ -445,7 +445,7 @@ def resolver(domain, begin=None, answers=None, nameservers=None, additional=None
   for ns, a_records_for_ns in get_glued(nameservers, additional):
 
     if not a_records_for_ns:
-      dns_query = resolver(ns._nsdn, begin=begin)
+      dns_query = resolve(ns._nsdn, begin=begin)
       if dns_query:
         a_records_for_ns = filter(lambda x: x._dn == ns._nsdn, dns_query["answers"])
 
@@ -456,7 +456,7 @@ def resolver(domain, begin=None, answers=None, nameservers=None, additional=None
     # otherwise, keep iterating thourgh nameservers
     if q:
       dict_append(aggregate, q)
-      return resolver(domain, begin=begin,
+      return resolve(domain, begin=begin,
                               answers=q["answers"],
                               nameservers=q["nameservers"],
                               additional=q["additional"],
@@ -479,8 +479,8 @@ while 1:
     continue
 
   try:
-    q = resolver(question._dn)
   except ExceededMaxQueryTime:
+    q = resolve(question._dn)
     q = None
     log.error("Exceeded maximum query time.")
   except ExceededMaxRetries:
