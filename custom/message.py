@@ -12,10 +12,10 @@ class Message:
 
   def __str__(self):
     return "\n\n".join([repr(self.header),
-    "QUESTION:\n" + pp.pformat(self.questions),
-    "ANSWER:\n" + pp.pformat(self.answers),
-    "AUTHORITY:\n" + pp.pformat(self.nameservers),
-    "ADDITIONAL:\n" + pp.pformat(self.additional)])
+      "QUESTION:\n" + pp.pformat(self.questions),
+      "ANSWER:\n" + pp.pformat(self.answers),
+      "AUTHORITY:\n" + pp.pformat(self.nameservers),
+      "ADDITIONAL:\n" + pp.pformat(self.additional)])
 
   def __repr__(self):
     return str(self)
