@@ -464,10 +464,10 @@ def resolve(domain, begin=None, answers=None, nameservers=None, additional=None,
     if q:
       dict_append(aggregate, q)
       return resolve(domain, begin=begin,
-                              answers=q["answers"],
-                              nameservers=q["nameservers"],
-                              additional=q["additional"],
-                              aggregate=aggregate)
+                             answers=q["answers"],
+                             nameservers=q["nameservers"],
+                             additional=q["additional"],
+                             aggregate=aggregate)
 
 # This is a simple, single-threaded server that takes successive
 # connections with each iteration of the following loop:
