@@ -365,7 +365,6 @@ def query(domain, begin, dns_ips):
 
   retries = 0 # keeps track how many times a request has been retried
   ith_dns_ip = 0 #
-  done = False
 
   while True:
     if retries > MAX_RETRIES:
