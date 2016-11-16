@@ -364,7 +364,7 @@ class DNSExceededMaxRetries(Exception):
 def query(domain, begin, dns_ips):
 
   retries = 0 # keeps track how many times a request has been retried
-  ith_dns_ip = 0 #
+  ith_dns_ip = 0 # keeps track of the index of the current ip from dns_ips
 
   while True:
     if retries > MAX_RETRIES:
