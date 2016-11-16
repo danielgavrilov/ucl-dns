@@ -339,15 +339,20 @@ def send_question(domain, dns_ip):
   # discard messages which have an altered question compared to the query
   elif response.question._dn != domain or response.question._type != QE.TYPE_A:
     logger.log(DEBUG2, "Ignored packet which has altered question.")
+  elif response.header._rcode == Header.RCODE_NAMEERR:
+    raise DNSNameError
   else:
     return response
 
 # Custom error classes
 
-class ExceededMaxQueryTime(Exception):
+class DNSNameError(Exception):
   pass
 
-class ExceededMaxRetries(Exception):
+class DNSExceededMaxQueryTime(Exception):
+  pass
+
+class DNSExceededMaxRetries(Exception):
   pass
 
 # Given a domain, reference start time (`begin`, in seconds) and a list of
@@ -364,9 +369,9 @@ def query(domain, begin, dns_ips):
 
   while True:
     if retries > MAX_RETRIES:
-      raise ExceededMaxRetries
+      raise DNSExceededMaxRetries
     if time() > (begin + MAX_QUERY_TIME):
-      raise ExceededMaxQueryTime
+      raise DNSExceededMaxQueryTime
     try:
       dns_ip = dns_ips[ith_dns_ip]
       response = send_question(domain, dns_ip)
@@ -378,6 +383,8 @@ def query(domain, begin, dns_ips):
         break
     except timeout:
       retries += 1
+    except DNSNameError:
+      return None
 
   answer_records =       filter(lambda x: domain == x._dn, response.answers)
   answer_a_records =     filter(lambda x: isinstance(x, RR_A), answer_records)
@@ -479,11 +486,11 @@ while 1:
     continue
 
   try:
-  except ExceededMaxQueryTime:
     q = resolve(question._dn)
+  except DNSExceededMaxQueryTime:
     q = None
     log.error("Exceeded maximum query time.")
-  except ExceededMaxRetries:
+  except DNSExceededMaxRetries:
     q = None
     log.error("Exceeded maximum retries.")
 
