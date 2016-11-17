@@ -478,14 +478,14 @@ while True:
   (query_data, address) = ss.recvfrom(512) # DNS limits UDP msgs to 512 bytes
 
   if not query_data:
-    log.error("Client provided no data.")
+    logger.log(DEBUG2, "Client provided no data.")
     continue
 
   query_msg = Message.fromData(query_data)
   question = query_msg.question
 
   if not question:
-    log.error("Client provided no question.")
+    logger.log(DEBUG2, "Client provided no question.")
     continue
 
   result = None
@@ -493,9 +493,9 @@ while True:
   try:
     result = resolve(question._dn)
   except DNSExceededMaxQueryTime:
-    log.error("Exceeded maximum query time.")
+    logger.log(DEBUG2, "Exceeded maximum query time.")
   except DNSExceededMaxRetries:
-    log.error("Exceeded maximum retries.")
+    logger.log(DEBUG2, "Exceeded maximum retries.")
 
   response_data = ""
 
