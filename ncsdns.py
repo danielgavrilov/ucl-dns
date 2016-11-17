@@ -18,20 +18,20 @@ from gz01.util import *
 
 from custom.message import Message
 
-# timeout in seconds to wait for reply
+# Timeout in seconds to wait for reply from server.
 TIMEOUT = 5
 
-# maximum time in seconds for a recursive DNS query
-MAX_QUERY_TIME = 60
+# Maximum time in seconds for a recursive DNS query.
+MAX_QUERY_TIME = 10
 
-# max retries if a server is not responsive
+# Maximum retries if a server is not responsive.
 MAX_RETRIES = 5
 
-# domain name and internet address of a root name server
+# Domain name and internet address of a root name server.
 ROOTNS_DN = "f.root-servers.net."
 ROOTNS_IN_ADDR = "192.5.5.241"
 
-# default DNS port
+# Default DNS port.
 DNS_PORT = 53
 
 class ACacheEntry:
@@ -298,6 +298,17 @@ def dict_append(dst, src):
     dst[key] += lst
   return dst
 
+# Custom error classes
+
+class DNSNameError(Exception):
+  pass
+
+class DNSExceededMaxQueryTime(Exception):
+  pass
+
+class DNSExceededMaxRetries(Exception):
+  pass
+
 # Sends a single A record "question" to the given dns_ip.
 # If it fails for whateher reason, it immediately gives up and returns `None`,
 # otherwise, it returns the message as a `Message` object.
@@ -343,17 +354,6 @@ def send_question(domain, dns_ip):
     raise DNSNameError
   else:
     return response
-
-# Custom error classes
-
-class DNSNameError(Exception):
-  pass
-
-class DNSExceededMaxQueryTime(Exception):
-  pass
-
-class DNSExceededMaxRetries(Exception):
-  pass
 
 # Given a domain, reference start time (`begin`, in seconds) and a list of
 # DNS server IPs, it returns the result as a dictionary of lists of "answer",
@@ -403,7 +403,10 @@ def query(domain, begin, dns_ips):
     "additional": additional_a_records
   }
 
-# TODO document this beast
+# Given a domain name, it tries to resolve it using all the wonderful DNS
+# servers of the Internet and returns a dict of answers, authoritative
+# nameservers and additional "glue" records for the nameservers.
+# TODO
 def resolve(domain, begin=None, answers=None, nameservers=None, additional=None, aggregate=None):
 
   if begin is None: begin = time()
@@ -470,45 +473,48 @@ def resolve(domain, begin=None, answers=None, nameservers=None, additional=None,
 
 # This is a simple, single-threaded server that takes successive
 # connections with each iteration of the following loop:
-while 1:
-  (data, address) = ss.recvfrom(512) # DNS limits UDP msgs to 512 bytes
-  if not data:
+while True:
+
+  (query_data, address) = ss.recvfrom(512) # DNS limits UDP msgs to 512 bytes
+
+  if not query_data:
     log.error("Client provided no data.")
     continue
 
-  reply = ""
-  d = Message.fromData(data)
-  question = d.question
+  query_msg = Message.fromData(query_data)
+  question = query_msg.question
 
   if not question:
     log.error("Client provided no question.")
     continue
 
+  result = None
+
   try:
-    q = resolve(question._dn)
+    result = resolve(question._dn)
   except DNSExceededMaxQueryTime:
-    q = None
     log.error("Exceeded maximum query time.")
   except DNSExceededMaxRetries:
-    q = None
     log.error("Exceeded maximum retries.")
 
-  if q:
-    message = Message(question=question, **q)
-    message.generate_header(d.header._id,
+  response_data = ""
+
+  if result:
+    response = Message(question=question, **result)
+    response.generate_header(query_msg.header._id,
                             Header.OPCODE_QUERY,
                             Header.RCODE_NOERR,
                             qr=True)
-    reply = message.pack()
   else:
-    message = Message(question=question)
-    message.generate_header(d.header._id,
+    response = Message(question=question)
+    response.generate_header(query_msg.header._id,
                             Header.OPCODE_QUERY,
                             Header.RCODE_SRVFAIL,
                             qr=True)
-    reply = message.pack()
 
-  logger.log(DEBUG2, "our reply in full:")
-  logger.log(DEBUG2, hexdump(reply))
+  response_data = response.pack()
 
-  ss.sendto(reply, address)
+  logger.log(DEBUG2, "our response_data in full:")
+  logger.log(DEBUG2, hexdump(response_data))
+
+  ss.sendto(response_data, address)
