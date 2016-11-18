@@ -99,9 +99,11 @@ acache = dict([(DomainName(ROOTNS_DN),
 # [domain name --> CnameCacheEntry]
 cnamecache = dict([])
 
-# Updates nscache with the given NS records.
-# Does not overwrite entries with greater TTL.
 def update_nscache(ns_records, ref_time):
+  """
+  Updates nscache with the given NS records.
+  Does not overwrite entries with greater TTL.
+  """
   for record in ns_records:
     domain, nsdn, ttl = record._dn, record._nsdn, record._ttl
     if ttl == 0: continue # do not cache records with 0 TTL
@@ -113,10 +115,12 @@ def update_nscache(ns_records, ref_time):
          nscache[domain][nsdn]._expiration < new_entry._expiration:
       nscache[domain][nsdn] = new_entry
 
-# Returns the NS records in nscache matching the given domain (and have
-# not expired). The returned records have an adjusted TTL according to
-# the elapsed time since they were inserted.
 def get_nscache(domain, ref_time):
+  """
+  Returns the NS records in nscache matching the given domain (and have
+  not expired). The returned records have an adjusted TTL according to
+  the elapsed time since they were inserted.
+  """
   results = []
   while len(results) == 0:
     if domain in nscache:
@@ -127,9 +131,11 @@ def get_nscache(domain, ref_time):
     domain = domain.parent()
   return results
 
-# Updates acache with the given A records.
-# Does not overwrite entries with greater TTL.
 def update_acache(a_records, ref_time):
+  """
+  Updates acache with the given A records.
+  Does not overwrite entries with greater TTL.
+  """
   for record in a_records:
     domain, ttl = record._dn, record._ttl
     addr = InetAddr.fromNetwork(record._addr)
@@ -143,10 +149,12 @@ def update_acache(a_records, ref_time):
          acache[domain]._dict[addr]._expiration < new_entry._expiration:
       acache[domain]._dict[addr] = new_entry
 
-# Returns the A records in acache matching the given domain (and have
-# not expired). The returned records have an adjusted TTL according to
-# the elapsed time since they were inserted.
 def get_acache(domain, ref_time):
+  """
+  Returns the A records in acache matching the given domain (and have
+  not expired). The returned records have an adjusted TTL according to
+  the elapsed time since they were inserted.
+  """
   results = []
   if domain in acache:
     for addr, entry in acache[domain]._dict.iteritems():
@@ -155,9 +163,11 @@ def get_acache(domain, ref_time):
           RR_A(domain, entry._expiration - long(ref_time), addr.toNetwork()))
   return results
 
-# Updates cnamecache with the given CNAME records.
-# Does not overwrite entries with greater TTL.
 def update_cnamecache(cname_records, ref_time):
+  """
+  Updates cnamecache with the given CNAME records.
+  Does not overwrite entries with greater TTL.
+  """
   for record in cname_records:
     domain, cname, ttl = record._dn, record._cname, record._ttl
     if ttl == 0: continue # do not cache records with 0 TTL
@@ -169,10 +179,12 @@ def update_cnamecache(cname_records, ref_time):
        cnamecache[domain]._expiration < new_entry._expiration:
       cnamecache[domain] = new_entry
 
-# Returns the CNAME records in cnamecache matching the given domain (and have
-# not expired). The returned records have an adjusted TTL according to
-# the elapsed time since they were inserted.
 def get_cnamecache(domain, ref_time):
+  """
+  Returns the CNAME records in cnamecache matching the given domain (and have
+  not expired). The returned records have an adjusted TTL according to
+  the elapsed time since they were inserted.
+  """
   results = []
   if domain in cnamecache:
     entry = cnamecache[domain]
@@ -181,8 +193,8 @@ def get_cnamecache(domain, ref_time):
         RR_CNAME(domain, entry._expiration - long(ref_time), entry._cname))
   return results
 
-# Parse the command line and assign us an ephemeral port to listen on:
 def check_port(option, opt_str, value, parser):
+  """Parse the command line and assign us an ephemeral port to listen on:"""
   if value < 32768 or value > 61000:
     raise OptionValueError("need 32768 <= port <= 61000")
   parser.values.port = value
@@ -214,20 +226,24 @@ cs = socket(AF_INET, SOCK_DGRAM)
 def rand_id():
   return randint(0, (1 << 16) - 1) # 1 << 16 == 2**16
 
-# Determines whether the first domain name is the same as OR
-# a child of the second.
 def is_subdomain_of(child, parent):
+  """
+  Determines whether the first domain name is the same as OR
+  a child of the second.
+  """
   while child != None:
     if child == parent:
       return True
     child = child.parent()
   return False
 
-# For a given domain and a time, it returns a dictionary of:
-# - the cached A and CNAME records for the domain as "answers"
-# - the cached NS records for the domain as "nameservers"
-# The time is specified in seconds since "the beginning of the world".
 def get_cache(domain, ref_time):
+  """
+  For a given domain and a time, it returns a dictionary of:
+  - the cached A and CNAME records for the domain as "answers"
+  - the cached NS records for the domain as "nameservers"
+  The time is specified in seconds since "the beginning of the world".
+  """
   answers = get_acache(domain, ref_time) + get_cnamecache(domain, ref_time)
   nameservers = get_nscache(domain, ref_time)
   return {
@@ -235,9 +251,11 @@ def get_cache(domain, ref_time):
     "nameservers": nameservers
   }
 
-# Given an RR (A, CNAME or NS), it returns a tuple of 3 items that is used to
-# detect duplicate records.
 def tuple_from_record(record):
+  """
+  Given an RR (A, CNAME or NS), it returns a tuple of 3 items that is used to
+  detect duplicate records.
+  """
   last = None
   if hasattr(record, "_addr"):
     last = record._addr
@@ -247,9 +265,11 @@ def tuple_from_record(record):
     last = record._cname
   return (record._type, record._dn, last)
 
-# Given a list of records (A, CNAME or NS), it removes duplicates, keeping the
-# ones with the highest TTL.
 def discard_dup_records(records):
+  """
+  Given a list of records (A, CNAME or NS), it removes duplicates, keeping the
+  ones with the highest TTL.
+  """
   # sorting by descending TTL ensures that any duplicates occurring will be of
   # lower or equal TTL.
   records = sorted(records, key=lambda x: x._ttl, reverse=True)
@@ -262,19 +282,23 @@ def discard_dup_records(records):
       seen.add(t)
   return results
 
-# Given a domain and a list of NS records, it returns the highest qualified
-# NS records for the domain.
 def get_highest_qualified(domain, ns_records):
+  """
+  Given a domain and a list of NS records, it returns the highest qualified
+  NS records for the domain.
+  """
   results = []
   while len(results) == 0 and domain != DomainName("."):
     results += filter(lambda x: x._dn == domain, ns_records)
     domain = domain.parent()
   return discard_dup_records(results)
 
-# Given a list of NS records, another of A records and the time, it returns a
-# list of glue records for the NS records. The time is specified in seconds
-# since "the beginning of the world" and is used for querying the cache for A records.
 def get_glue_records(ns_records, a_records, ref_time):
+  """
+  Given a list of NS records, another of A records and the time, it returns a
+  list of glue records for the NS records. The time is specified in seconds
+  since "the beginning of the world" and is used for querying the cache for A records.
+  """
   results = []
   for ns in ns_records:
     glue_records = filter(lambda x: ns._nsdn == x._dn, a_records) \
@@ -282,18 +306,22 @@ def get_glue_records(ns_records, a_records, ref_time):
     results += glue_records
   return discard_dup_records(results)
 
-# Given a list of NS records and another of A records, it returns a list of
-# tuples (ns_record, [a_records]), associating each NS record with its glue A records.
 def get_glued(ns_records, a_records):
+  """
+  Given a list of NS records and another of A records, it returns a list of
+  tuples (ns_record, [a_records]), associating each NS record with its glue A records.
+  """
   results = []
   for ns in ns_records:
     glue_records = filter(lambda x: ns._nsdn == x._dn, a_records)
     results.append((ns, glue_records))
   return sorted(results, key=lambda x: len(x[1]), reverse=True)
 
-# Given two dictionaries whose values are lists,
-# it appends the list of `src` onto `dst`.
 def dict_append(dst, src):
+  """
+  Given two dictionaries whose values are lists,
+  it appends the list of `src` onto `dst`.
+  """
   for key, lst in src.iteritems():
     dst[key] += lst
   return dst
@@ -309,10 +337,12 @@ class DNSExceededMaxQueryTime(Exception):
 class DNSExceededMaxRetries(Exception):
   pass
 
-# Sends a single A record "question" to the given dns_ip.
-# If it fails for whateher reason, it immediately gives up and returns `None`,
-# otherwise, it returns the message as a `Message` object.
 def send_question(domain, dns_ip):
+  """
+  Sends a single A record "question" to the given dns_ip.
+  If it fails for whateher reason, it immediately gives up and returns `None`,
+  otherwise, it returns the message as a `Message` object.
+  """
 
   id = rand_id()
   message = Message(question=QE(dn=domain))
@@ -322,8 +352,7 @@ def send_question(domain, dns_ip):
   message_data = message.pack()
 
   print "\n=============================================================================\n"
-  print "QUERY TO %s:\n" % dns_ip
-  print message
+  print "QUERY TO %s for domain %s" % (dns_ip, str(domain))
 
   cs.sendto(message_data, (dns_ip, DNS_PORT))
   response_data, address = cs.recvfrom(512)
@@ -355,13 +384,15 @@ def send_question(domain, dns_ip):
   else:
     return response
 
-# Given a domain, reference start time (`begin`, in seconds) and a list of
-# DNS server IPs, it returns the result as a dictionary of lists of "answer",
-# "authority" and "additional" records.
-# It automatically retries in case of message errors and raises exceptions when
-# exceeding the maximum retries or maximum query time.
-# It also automatically updates the cache with A and NS records.
 def query(domain, begin, dns_ips):
+  """
+  Given a domain, reference start time (`begin`, in seconds) and a list of
+  DNS server IPs, it returns the result as a dictionary of lists of "answer",
+  "authority" and "additional" records.
+  It automatically retries in case of message errors and raises exceptions when
+  exceeding the maximum retries or maximum query time.
+  It also automatically updates the cache with A and NS records.
+  """
 
   retries = 0 # keeps track how many times a request has been retried
   ith_dns_ip = 0 # keeps track of the index of the current ip from dns_ips
@@ -403,13 +434,19 @@ def query(domain, begin, dns_ips):
     "additional": additional_a_records
   }
 
-# Given a domain name, it tries to resolve it using all the wonderful DNS
-# servers of the Internet and returns a dict of answers, authoritative
-# nameservers and additional "glue" records for the nameservers.
-# TODO
 def resolve(domain, begin=None, answers=None, nameservers=None, additional=None, aggregate=None):
+  """
+  Given a domain name, it tries to resolve it using all the wonderful DNS
+  servers of the Internet and returns a dict of answers, authoritative
+  nameservers and additional "glue" records for the nameservers.
 
+  The optional keywords are passed around for recursive calls.
+  """
+
+  # keep the reference start timestamp to query the cache.
   if begin is None: begin = time()
+
+  # store
   if answers is None: answers = []
   if nameservers is None: nameservers = []
   if additional is None: additional = []
