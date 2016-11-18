@@ -460,16 +460,17 @@ def resolve(domain, begin=None, answers=None, nameservers=None, additional=None,
 
     dns_ips = map(lambda x: inet_ntoa(x._addr), a_records_for_ns)
     # TODO avoid loops
-    q = query(domain, begin=begin, dns_ips=dns_ips)
-    # if successfully resolved, return result
-    # otherwise, keep iterating thourgh nameservers
-    if q:
-      dict_append(aggregate, q)
-      return resolve(domain, begin=begin,
-                             answers=q["answers"],
-                             nameservers=q["nameservers"],
-                             additional=q["additional"],
-                             aggregate=aggregate)
+    if dns_ips:
+      q = query(domain, begin=begin, dns_ips=dns_ips)
+      # if successfully resolved, return result
+      # otherwise, keep iterating thourgh nameservers
+      if q:
+        dict_append(aggregate, q)
+        return resolve(domain, begin=begin,
+                               answers=q["answers"],
+                               nameservers=q["nameservers"],
+                               additional=q["additional"],
+                               aggregate=aggregate)
 
 # This is a simple, single-threaded server that takes successive
 # connections with each iteration of the following loop:
