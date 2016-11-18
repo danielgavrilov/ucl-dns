@@ -16,8 +16,6 @@ from gz01.dnslib.QE import QE
 from gz01.inetlib.types import *
 from gz01.util import *
 
-from custom.message import Message
-
 # Timeout in seconds to wait for reply from server.
 TIMEOUT = 2
 
@@ -106,7 +104,6 @@ def update_nscache(ns_records, ref_time):
   """
   for record in ns_records:
     domain, nsdn, ttl = record._dn, record._nsdn, record._ttl
-    if ttl == 0: continue # do not cache records with 0 TTL
     new_entry = CacheEntry(expiration=ttl + long(ref_time),
                            authoritative=True)
     if domain not in nscache:
@@ -139,7 +136,6 @@ def update_acache(a_records, ref_time):
   for record in a_records:
     domain, ttl = record._dn, record._ttl
     addr = InetAddr.fromNetwork(record._addr)
-    if ttl == 0: continue # do not cache records with 0 TTL
     new_entry = CacheEntry(expiration=ttl + long(ref_time),
                            authoritative=True)
 
@@ -170,7 +166,6 @@ def update_cnamecache(cname_records, ref_time):
   """
   for record in cname_records:
     domain, cname, ttl = record._dn, record._cname, record._ttl
-    if ttl == 0: continue # do not cache records with 0 TTL
     new_entry = CnameCacheEntry(cname,
                                 expiration=ttl + long(ref_time),
                                 authoritative=True)
@@ -239,17 +234,15 @@ def is_subdomain_of(child, parent):
 
 def get_cache(domain, ref_time):
   """
-  For a given domain and a time, it returns a dictionary of:
-  - the cached A and CNAME records for the domain as "answers"
-  - the cached NS records for the domain as "nameservers"
+  For a given domain and a time, it returns a tuple of:
+  - the cached A and CNAME records for the domain
+  - the cached NS records for the domain
   The time is specified in seconds since "the beginning of the world".
   """
   answers = get_acache(domain, ref_time) + get_cnamecache(domain, ref_time)
   nameservers = get_nscache(domain, ref_time)
-  return {
-    "answers": answers,
-    "nameservers": nameservers
-  }
+  additional = get_glue_records(nameservers, ref_time)
+  return (answers, nameservers, additional)
 
 def tuple_from_record(record):
   """
@@ -282,18 +275,7 @@ def discard_dup_records(records):
       seen.add(t)
   return results
 
-def get_highest_qualified(domain, ns_records):
-  """
-  Given a domain and a list of NS records, it returns the highest qualified
-  NS records for the domain.
-  """
-  results = []
-  while len(results) == 0 and domain != DomainName("."):
-    results += filter(lambda x: x._dn == domain, ns_records)
-    domain = domain.parent()
-  return discard_dup_records(results)
-
-def get_glue_records(ns_records, a_records, ref_time):
+def get_glue_records(ns_records, ref_time):
   """
   Given a list of NS records, another of A records and the time, it returns a
   list of glue records for the NS records. The time is specified in seconds
@@ -301,9 +283,7 @@ def get_glue_records(ns_records, a_records, ref_time):
   """
   results = []
   for ns in ns_records:
-    glue_records = filter(lambda x: ns._nsdn == x._dn, a_records) \
-                 + get_acache(ns._nsdn, ref_time)
-    results += glue_records
+    results += get_acache(ns._nsdn, ref_time)
   return discard_dup_records(results)
 
 def get_glued(ns_records, a_records):
@@ -316,15 +296,6 @@ def get_glued(ns_records, a_records):
     glue_records = filter(lambda x: ns._nsdn == x._dn, a_records)
     results.append((ns, glue_records))
   return sorted(results, key=lambda x: len(x[1]), reverse=True)
-
-def dict_append(dst, src):
-  """
-  Given two dictionaries whose values are lists,
-  it appends the list of `src` onto `dst`.
-  """
-  for key, lst in src.iteritems():
-    dst[key] += lst
-  return dst
 
 # Custom error classes
 
@@ -389,6 +360,7 @@ def query(domain, begin, dns_ips):
   Given a domain, reference start time (`begin`, in seconds) and a list of
   DNS server IPs, it returns the result as a dictionary of lists of "answer",
   "authority" and "additional" records.
+
   It automatically retries in case of message errors and raises exceptions when
   exceeding the maximum retries or maximum query time.
   It also automatically updates the cache with A and NS records.
@@ -434,7 +406,7 @@ def query(domain, begin, dns_ips):
     "additional": additional_a_records
   }
 
-def resolve(domain, begin=None, answers=None, nameservers=None, additional=None, aggregate=None):
+def resolve(domain, begin=None):
   """
   Given a domain name, it tries to resolve it using all the wonderful DNS
   servers of the Internet and returns a dict of answers, authoritative
@@ -446,68 +418,42 @@ def resolve(domain, begin=None, answers=None, nameservers=None, additional=None,
   # keep the reference start timestamp to query the cache.
   if begin is None: begin = time()
 
-  # store
-  if answers is None: answers = []
-  if nameservers is None: nameservers = []
-  if additional is None: additional = []
-
-  cache = get_cache(domain, ref_time=begin)
-
-  answers = discard_dup_records(answers + cache["answers"])
-  nameservers = discard_dup_records(nameservers + cache["nameservers"])
-  additional = get_glue_records(nameservers, additional, ref_time=begin)
-
-  aggregate_temp = {
-    "answers": answers,
-    "nameservers": nameservers,
-    "additional": additional
-  }
-
-  if aggregate is None:
-    aggregate = aggregate_temp
-  else:
-    dict_append(aggregate, aggregate_temp)
+  answers, nameservers, additional = get_cache(domain, ref_time=begin)
 
   answer_a_records =     filter(lambda x: isinstance(x, RR_A), answers)
   answer_cname_records = filter(lambda x: isinstance(x, RR_CNAME), answers)
 
   if answer_a_records:
-    aggregate_answers = discard_dup_records(aggregate["answers"])
-    highest_qualified = get_highest_qualified(domain, aggregate["nameservers"])
-    glue_records = get_glue_records(highest_qualified, additional, ref_time=begin)
     return {
-      "answers": aggregate_answers,
-      "nameservers": highest_qualified,
-      "additional": glue_records
+      "answers": answers,
+      "nameservers": nameservers,
+      "additional": additional
     }
 
   if answer_cname_records:
     for record in answer_cname_records:
       q = resolve(record._cname, begin=begin)
       if q:
+        # add the CNAME to the answers
         q["answers"] = [record] + q["answers"]
         return q
 
   for ns, a_records_for_ns in get_glued(nameservers, additional):
 
+    # if we have no A records for a NS domain, try to resolve it
     if not a_records_for_ns:
       dns_query = resolve(ns._nsdn, begin=begin)
       if dns_query:
         a_records_for_ns = filter(lambda x: x._dn == ns._nsdn, dns_query["answers"])
 
+    # extract all the IPs of nameservers we have
     dns_ips = map(lambda x: inet_ntoa(x._addr), a_records_for_ns)
-    # TODO avoid loops
     if dns_ips:
       q = query(domain, begin=begin, dns_ips=dns_ips)
       # if successfully resolved, return result
       # otherwise, keep iterating thourgh nameservers
       if q:
-        dict_append(aggregate, q)
-        return resolve(domain, begin=begin,
-                               answers=q["answers"],
-                               nameservers=q["nameservers"],
-                               additional=q["additional"],
-                               aggregate=aggregate)
+        return resolve(domain, begin=begin)
 
 # This is a simple, single-threaded server that takes successive
 # connections with each iteration of the following loop:
