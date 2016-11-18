@@ -19,7 +19,7 @@ from gz01.util import *
 from custom.message import Message
 
 # Timeout in seconds to wait for reply from server.
-TIMEOUT = 5
+TIMEOUT = 2
 
 # Maximum time in seconds for a recursive DNS query.
 MAX_QUERY_TIME = 10
