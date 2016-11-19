@@ -754,10 +754,10 @@ e2847.dspb.akamaiedge.net. 20	IN	A	104.66.73.122
 3.
 ================================================================================
 
-newgate has an authoritative nameserver ja.net for which we have to start over
+newgate.cs.ucl.ac.uk. has an authoritative nameserver ja.net for which we are given no additional records, so we need to start the query again from the root server.
 
 ================================================================================
 4.
 ================================================================================
 
-There were so many CNAMEs like omg
+www.microsoft.com. has 3 CNAMEs, and for each we need to restart resolving.
